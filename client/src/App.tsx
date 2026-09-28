@@ -2,7 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { GuestRoute, ProtectedRoute } from './components/RouteGuards'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
-import RegisterPage from './pages/RegisterPAge'
+import RegisterPage from './pages/RegisterPage'
 
 export default function App() {
   return (
