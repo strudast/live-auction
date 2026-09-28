@@ -6,6 +6,7 @@ import mongoose from 'mongoose'
 import { env } from './config/env'
 import { authRouter } from './routes/auth'
 import { errorHandler } from './middleware/errorHandler'
+import { auctionsRouter } from './routes/auctions'
 
 // The app is built and exported here, but it is NOT started here. Starting
 // (connecting to the database and listening on a port) happens in index.ts.
@@ -51,6 +52,7 @@ app.get('/api/health', (_req, res) => {
 // Mounted under /api/auth, so the route '/register' becomes POST /api/auth/register.
 // The /api prefix also matches the Vite dev proxy configured earlier.
 app.use('/api/auth', authRouter)
+app.use('/api/auctions', auctionsRouter)
 
 // The error handler MUST come last. Express calls it only for errors raised by
 // middleware and routes registered above it.
