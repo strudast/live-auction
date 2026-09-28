@@ -29,10 +29,14 @@ const isProd = env.NODE_ENV === 'production'
 //   'none' = production with the client and API on different domains. Browsers
 //            only accept 'none' together with secure: true, which is why
 //            isProd drives both.
+// Same-origin in every environment now (the server also serves the client in
+// production), so 'lax' works everywhere and is safer than 'none': the browser
+// won't attach the cookie to cross-site POSTs, which closes off the classic CSRF route.
+// `secure` stays on in production, since Render terminates HTTPS in front of us.
 export const clearCookieOptions = {
   httpOnly: true,
   secure: isProd,
-  sameSite: isProd ? ('none' as const) : ('lax' as const),
+  sameSite: 'lax' as const,
 }
 
 // `as const` keeps 'none' and 'lax' as literal types. Without it TypeScript

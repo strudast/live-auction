@@ -8,6 +8,7 @@ import { authRouter } from './routes/auth'
 import { errorHandler } from './middleware/errorHandler'
 import { auctionsRouter } from './routes/auctions'
 import { apiLimiter, loginLimiter, registerLimiter } from './middleware/rateLimit'
+import path from 'path'
 
 // The app is built and exported here, but it is NOT started here. Starting
 // (connecting to the database and listening on a port) happens in index.ts.
@@ -58,6 +59,26 @@ app.get('/api/health', (_req, res) => {
 // The /api prefix also matches the Vite dev proxy configured earlier.
 app.use('/api/auth', authRouter)
 app.use('/api/auctions', auctionsRouter)
+
+// In production this server also serves the built React app, so the whole project
+// is one origin. In development Vite serves the client, so none of this runs.
+if (env.NODE_ENV === 'production') {
+  // __dirname is server/dist once compiled, so ../../client/dist is the Vite output.
+  const clientDist = path.resolve(__dirname, '..', '..', 'client', 'dist')
+
+  // Serves the JS/CSS bundles and other static files.
+  app.use(express.static(clientDist))
+
+  // React Router handles URLs like /auctions/123 in the browser, so a refresh
+  // on such a URL must still return index.html. We limit this to GET requests and
+  // skip /api, so a mistyped API URL gets an error and not an HTML page.
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+      return next()
+    }
+    res.sendFile(path.join(clientDist, 'index.html'))
+  })
+}
 
 // The error handler MUST come last. Express calls it only for errors raised by
 // middleware and routes registered above it.
