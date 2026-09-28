@@ -74,10 +74,24 @@ export default function LoginPage() {
 
         <p className="text-sm text-slate-400">
           No account?{' '}
+                  {/* Lets a reviewer try the app in one click. The password is public on
+            purpose (see the seed script). This calls the state setters directly,
+            so the form works normally after it fills the fields. */}
+        <button
+          type="button"
+          onClick={() => {
+            setEmail('demo@example.com')
+            setPassword('demo1234')
+          }}
+          className="text-sm text-slate-400 underline hover:text-slate-200"
+        >
+          Fill in demo account
+        </button>
+         </p>
           <Link to="/register" className="text-emerald-400 hover:underline">
             Register
           </Link>
-        </p>
+       
       </form>
     </div>
   )
