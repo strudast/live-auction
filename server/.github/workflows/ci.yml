@@ -1,0 +1,77 @@
+name: CI
+
+# Run on every push to main, and on every pull request. Pull requests matter
+# even for a solo project: they show the checks before code reaches main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# If a newer push arrives while an older run is still going, cancel the old one.
+# This saves minutes and avoids confusing results from outdated commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: these jobs only read the repository, so the token gets nothing more.
+permissions:
+  contents: read
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # The repo has two separate packages. Every `run:` step below executes in ./server.
+        working-directory: server
+    env:
+      # Tests use an in-memory MongoDB, which downloads a binary the first time.
+      # Pinning the download folder makes the caching step below deterministic.
+      MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.mongodb-binaries
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # the same major version you develop on
+          cache: npm # caches npm's download cache, not node_modules
+          cache-dependency-path: server/package-lock.json
+
+      # `npm ci` installs exactly what package-lock.json says and fails if the
+      # lockfile and package.json disagree. `npm install` would silently
+      # change the lockfile, which hides that kind of drift.
+      - run: npm ci
+
+      # Type-check and compile. This is what would break the Render deploy.
+      - run: npm run build
+
+      # Cache the MongoDB binary between runs, so only the first run pays for the download.
+      - uses: actions/cache@v4
+        with:
+          path: .mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('server/package-lock.json') }}
+
+      # --run makes vitest run once and exit, rather than sit in watch mode.
+      - run: npm test -- --run
+
+  client:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+
+      # Lint before build: it's the faster check, so a failure shows up sooner.
+      - run: npm run lint
+
+      # `npm run build` runs tsc and then vite build.
+      - run: npm run build

@@ -88,17 +88,25 @@ async function main() {
   // 1. Create or update the demo users. Upserting means running the script twice
   //    never fails on the unique email index, and it re-sets the password,
   //    so the documented password always works.
-  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12)
-  const users = []
-  for (const person of PEOPLE) {
-    const user = await User.findOneAndUpdate(
-      { email: person.email },
-      { $set: { name: person.name, passwordHash } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    )
-    if (!user) throw new Error(`Could not upsert ${person.email}`)
-    users.push(user)
-  }
+ const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12)
+
+  // Building `users` from return values lets TypeScript infer its element type,
+  // which an empty `[]` filled by push() can't do once the array is read inside
+  // a callback. The upserts touch different emails, so running them in parallel is safe,
+  // and Promise.all keeps the results in the same order as PEOPLE (the specs rely on that order).
+  const upserted = await Promise.all(
+    PEOPLE.map((person) =>
+      User.findOneAndUpdate(
+        { email: person.email },
+        { $set: { name: person.name, passwordHash } },
+        { upsert: true, new: true, setDefaultsOnInsert: true },
+      ),
+    ),
+  )
+  const users = upserted.map((user, i) => {
+    if (!user) throw new Error(`Could not upsert ${PEOPLE[i]!.email}`)
+    return user
+  })
 
   // 2. Delete ONLY previously seeded data: auctions sold by demo users, plus the bids on them.
   //    Bids are matched through the auction, not through the bidder. A demo
