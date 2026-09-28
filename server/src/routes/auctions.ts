@@ -5,26 +5,25 @@ import { Bid } from '../models/Bid'
 import { requireAuth } from '../middleware/auth'
 import { HttpError } from '../middleware/errorHandler'
 import { endExpiredAuctions, placeBid } from '../services/bidding'
+import { broadcast } from '../lib/realtime'
 
 export const auctionsRouter = Router()
 
-const MAX_CENTS = 100_000_000 // 1,000,000.00. A sane ceiling that stays far inside safe integer range.
+const MAX_CENTS = 100_000_000 // 1,000,000.00, far inside the safe integer range
 
 const createSchema = z.object({
   title: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).default(''),
   startingPriceCents: z.number().int().min(1).max(MAX_CENTS),
-  // Minimum 1 minute, so a demo auction can be created and watched end quickly.
   durationMinutes: z.number().int().min(1).max(7 * 24 * 60),
 })
 
 const bidSchema = z.object({
-  // .int() rejects 10.5. Fractions of a cent must never reach the database.
   amountCents: z.number().int().min(1).max(MAX_CENTS),
 })
 
-// Malformed ids would make Mongoose throw a CastError (a 500). Checking the
-// shape first turns them into a clean 404.
+// A malformed id would make Mongoose throw a CastError (a 500). Checking the
+// shape first turns it into a clean 404.
 const objectId = z.string().regex(/^[a-f\d]{24}$/i)
 function parseId(raw: string | string[] | undefined): string {
   const result = objectId.safeParse(raw)
@@ -32,21 +31,17 @@ function parseId(raw: string | string[] | undefined): string {
   return result.data
 }
 
-// A populated ref is an object with a name. An unpopulated one is just an id.
-// Handling both lets one serializer serve every route. `any` is used because
-// Mongoose's populated types are awkward, and this small helper is the only place.
+// A populated ref is an object with a name. An unpopulated one is only an id.
+// `any` because Mongoose's populated types are awkward; this helper is the only place.
 function refToDto(ref: any): { id: string; name: string | null } | null {
   if (!ref) return null
   if (typeof ref === 'object' && 'name' in ref) return { id: String(ref._id), name: ref.name }
   return { id: String(ref), name: null }
 }
 
-// The shape the client sees. Building it by hand (rather than sending the raw
-// document) keeps internal fields such as __v out of the API.
+// The shape the client sees. Built by hand so internal fields (__v) never leak.
 function auctionToDto(a: any) {
-  const now = new Date()
-  // Live-but-expired counts as ended even if the cleanup hasn't run yet.
-  const ended = a.status === 'ended' || a.endsAt <= now
+  const ended = a.status === 'ended' || a.endsAt <= new Date()
   return {
     id: String(a._id),
     title: a.title,
@@ -62,8 +57,17 @@ function auctionToDto(a: any) {
   }
 }
 
-// The client should compute its countdown from the SERVER's clock. Sending
-// serverTime lets it measure the offset from the user's own clock once.
+// One serializer for bids, used by the detail route, the bid route, AND the
+// broadcast, so the client only ever has to understand one bid shape.
+function bidToDto(b: any) {
+  return {
+    id: String(b._id),
+    bidder: refToDto(b.bidder),
+    amountCents: b.amountCents,
+    createdAt: b.createdAt.toISOString(),
+  }
+}
+
 auctionsRouter.get('/', async (_req, res) => {
   await endExpiredAuctions()
   const auctions = await Auction.find()
@@ -99,12 +103,7 @@ auctionsRouter.get('/:id', async (req, res) => {
 
   res.json({
     auction: auctionToDto(auction),
-    bids: bids.map((b: any) => ({
-      id: String(b._id),
-      bidder: refToDto(b.bidder),
-      amountCents: b.amountCents,
-      createdAt: b.createdAt.toISOString(),
-    })),
+    bids: bids.map(bidToDto),
     serverTime: new Date().toISOString(),
   })
 })
@@ -116,8 +115,6 @@ auctionsRouter.post('/:id/bids', requireAuth, async (req, res) => {
   const result = await placeBid({ auctionId: id, userId: req.userId as string, amountCents })
 
   if (!result.ok) {
-    // Each expected failure gets a fitting status code. 409 Conflict means
-    // "valid request, but it conflicts with the current state".
     switch (result.reason) {
       case 'not_found':
         throw new HttpError(404, 'Auction not found')
@@ -130,5 +127,24 @@ auctionsRouter.post('/:id/bids', requireAuth, async (req, res) => {
     }
   }
 
-  res.status(201).json({ auction: auctionToDto(result.auction), serverTime: new Date().toISOString() })
+  // Reload both documents WITH names populated, because the client displays
+  // "who is winning". The bid is already safely saved at this point, so a
+  // failure below would only affect the broadcast, and not the bid itself.
+  const [fresh, bid] = await Promise.all([
+    Auction.findById(id).populate('seller', 'name').populate('highestBidder', 'name'),
+    Bid.findById(result.bidId).populate('bidder', 'name'),
+  ])
+  if (!fresh || !bid) throw new HttpError(500, 'Bid saved but could not be loaded')
+
+  const payload = {
+    auction: auctionToDto(fresh),
+    bid: bidToDto(bid),
+    serverTime: new Date().toISOString(),
+  }
+
+  // Tell everyone watching this auction (including the bidder's other tabs)...
+  broadcast(id, 'bid:new', payload)
+  // ...and answer the bidder directly, so their own screen updates even if
+  // their socket happens to be disconnected right now.
+  res.status(201).json(payload)
 })

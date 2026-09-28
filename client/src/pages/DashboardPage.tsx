@@ -1,27 +1,54 @@
-import { useAuth } from '../auth/AuthContext'
+import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { listAuctions } from '../api/auctions'
+import { getErrorMessage } from '../api/client'
+import { formatCents } from '../lib/money'
+import { Countdown } from '../components/Countdown'
 
-// Placeholder home page. It exists so we can prove that the protected route and
-// logout work. Later it becomes the auction list.
+// The auction list. It is not live over sockets. It just refetches every 15
+// seconds, which is enough for a browse page. Sockets are reserved for the
+// page where a second of delay actually matters.
 export default function DashboardPage() {
-  const { user, logout } = useAuth()
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['auctions'],
+    queryFn: listAuctions,
+    refetchInterval: 15_000,
+  })
+
+  if (isLoading) return <p className="text-slate-400">Loading auctions…</p>
+  if (error) return <p role="alert" className="text-red-400">{getErrorMessage(error)}</p>
+  if (!data || data.auctions.length === 0) {
+    return (
+      <p className="text-slate-400">
+        No auctions yet.{' '}
+        <Link to="/auctions/new" className="text-emerald-400 hover:underline">
+          Create the first one
+        </Link>
+      </p>
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-emerald-400">Live Auction</h1>
-        <div className="flex items-center gap-4">
-          {/* ProtectedRoute guarantees `user` exists here, but TypeScript can't
-              know that across components, so we use ?. instead of a non-null assertion (!). */}
-          <span className="text-slate-300">{user?.name}</span>
-          <button
-            onClick={() => void logout()}
-            className="rounded-md border border-slate-600 px-3 py-1 text-sm hover:bg-slate-800"
+    <ul className="grid gap-4 sm:grid-cols-2">
+      {data.auctions.map((a) => (
+        <li key={a.id}>
+          <Link
+            to={`/auctions/${a.id}`}
+            className="block rounded-lg border border-slate-700 bg-slate-800 p-4 hover:border-emerald-500"
           >
-            Log out
-          </button>
-		  {/* void logout() marks the promise as intentionally not awaited. It keeps lint rules about floating promises quiet, and it's fine here because logout can't meaningfully fail in the UI. */}
-        </div>
-      </header>
-    </div>
+            <h2 className="font-semibold">{a.title}</h2>
+            <p className="mt-1 text-2xl font-bold text-emerald-400">{formatCents(a.currentBidCents)}</p>
+            <p className="mt-2 flex justify-between text-sm text-slate-400">
+              <span>{a.bidCount} {a.bidCount === 1 ? 'bid' : 'bids'}</span>
+              {a.status === 'ended' ? (
+                <span>Ended</span>
+              ) : (
+                <Countdown endsAt={a.endsAt} clockOffsetMs={data.clockOffsetMs} />
+              )}
+            </p>
+          </Link>
+        </li>
+      ))}
+    </ul>
   )
 }

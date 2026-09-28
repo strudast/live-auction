@@ -8,7 +8,7 @@ export const SNIPE_WINDOW_MS = 30_000
 // knows which other fields exist. This beats throwing for expected outcomes
 // like "bid too low", which are normal results, not exceptions.
 export type BidOutcome =
-  | { ok: true; auction: NonNullable<Awaited<ReturnType<typeof Auction.findOneAndUpdate>>> }
+   | { ok: true; auction: NonNullable<Awaited<ReturnType<typeof Auction.findOneAndUpdate>>>; bidId: string }
   | { ok: false; reason: 'not_found' | 'own_auction' | 'ended' }
   | { ok: false; reason: 'too_low'; minimumCents: number }
 
@@ -63,8 +63,8 @@ export async function placeBid({
     // the two, the auction would have a winning bid missing from history. That
     // is a known limitation (MongoDB transactions could close it). It is
     // acceptable here and belongs in the README.
-    await Bid.create({ auction: auctionId, bidder: userId, amountCents })
-    return { ok: true, auction: updated }
+ const bid = await Bid.create({ auction: auctionId, bidder: userId, amountCents })
+    return { ok: true, auction: updated, bidId: bid.id }
   }
 
   // The bid was rejected. Look at the auction again ONLY to explain why. This
