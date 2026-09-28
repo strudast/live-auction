@@ -6,6 +6,7 @@ import { requireAuth } from '../middleware/auth'
 import { HttpError } from '../middleware/errorHandler'
 import { endExpiredAuctions, placeBid } from '../services/bidding'
 import { broadcast } from '../lib/realtime'
+import { bidLimiter } from '../middleware/rateLimit'
 
 export const auctionsRouter = Router()
 
@@ -108,7 +109,7 @@ auctionsRouter.get('/:id', async (req, res) => {
   })
 })
 
-auctionsRouter.post('/:id/bids', requireAuth, async (req, res) => {
+auctionsRouter.post('/:id/bids', requireAuth, bidLimiter, async (req, res) => {
   const id = parseId(req.params.id)
   const { amountCents } = bidSchema.parse(req.body)
 

@@ -7,6 +7,7 @@ import { env } from './config/env'
 import { authRouter } from './routes/auth'
 import { errorHandler } from './middleware/errorHandler'
 import { auctionsRouter } from './routes/auctions'
+import { apiLimiter, loginLimiter, registerLimiter } from './middleware/rateLimit'
 
 // The app is built and exported here, but it is NOT started here. Starting
 // (connecting to the database and listening on a port) happens in index.ts.
@@ -35,8 +36,12 @@ app.use(helmet())
 //          on cross-origin requests. Without it login silently fails.
 app.use(cors({ origin: env.CLIENT_URL, credentials: true }))
 
-// Parses JSON request bodies into req.body. Express's built-in parser is
-// enough, so the old `body-parser` package isn't needed.
+// Rate limiting runs before body parsing, so rejected requests cost almost
+// nothing. It runs after CORS so that browsers can still read the 429 response.
+app.use('/api', apiLimiter)
+app.use('/api/auth/login', loginLimiter)
+app.use('/api/auth/register', registerLimiter)
+
 app.use(express.json())
 
 // Parses the Cookie header into req.cookies. requireAuth depends on it.
